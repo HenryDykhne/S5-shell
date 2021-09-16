@@ -1,7 +1,8 @@
 import boto3
-import re
 import os
 import configparser
+import shlex
+
 config = configparser.ConfigParser()
 config.read('S5-S3conf')
 ACCESS_KEY = config.get('edykhne', 'aws_access_key_id')
@@ -28,9 +29,11 @@ else:
 
 while True:
     print("S5>", end='')
+
     inputText = input()
-    splitInput = re.split(' ', inputText)
-    if splitInput[0] == "quit" or splitInput[0] == "exit":
+    args = shlex.split(inputText)
+    print(args)
+    if args[0] == "quit" or args[0] == "exit":
         break
     else:
         os.system(inputText)
