@@ -1,14 +1,14 @@
 import os
 import shlex
-import s3commands
 import readline
+from S3lib import S3
 
 #commands
 shell_specific_commands = {}
-client = s3commands.config()
+s3 = S3()
 
 
-if client is not None:
+if s3.client is not None: #this does not work. fix it
     print("Welcome to the AWS S3 Storage Shell (S5)")
     print("You are now connected to your S3 storage")
 else:
@@ -17,8 +17,7 @@ else:
     print("Please review procedures for authenticating your account on AWS S3")
 
 while True:
-    print("S5> ", end='')
-    inputText = input()
+    inputText = input("S5> ")
     args = shlex.split(inputText)
 
     print(args)
@@ -27,8 +26,8 @@ while True:
         continue
     elif args[0] == "exit" or args[0] == "quit":
         exit()
-    elif args[0] in s3commands.commands.keys():
-        print(s3commands.commands[args[0]](args, client))
+    elif args[0] in s3.commands.keys():
+        print(s3.commands[args[0]](args))
     elif args[0] in shell_specific_commands.keys():
         shell_specific_commands[args[0]](args)
     else:
