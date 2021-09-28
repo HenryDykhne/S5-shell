@@ -2,20 +2,35 @@ import os
 import shlex
 import readline
 from S3lib import S3
+import copy
 
 path = os.getcwd()
+initial_response = {"code": 1, "text":"unspecified error"}
+
+def os_command(inputText):
+    response = copy.deepcopy(initial_response)
+    try:
+        os.system(inputText)
+        response["code"] = 0
+        response["text"] = ""
+    except Exception as e:
+        response["text"] = str(e)
+    return response
 
 def cd(args):
+    response = copy.deepcopy(initial_response)
     if len(args) == 1 or args[1] == "" or args[1] == " ":
         args[1] = ""
         
     try:
         os.chdir(args[1])
-    except:
-        return "invalid path"
+        response["code"] = 0
+        response["text"] = ""
+    except FileNotFoundError as e:
+        response["text"] = str(e)
 
     path = os.getcwd()
-    return ''
+    return response
 
 #commands
 shell_commands = {}
@@ -24,7 +39,11 @@ s3 = S3()
 
 
 
-if s3.client is not None: #this does not work. fix it
+if s3.client is not None: #FIXME: this does not work. fix it
+    #DONT FORGET!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     print("Welcome to the AWS S3 Storage Shell (S5)")
     print("You are now connected to your S3 storage")
 else:
@@ -45,7 +64,10 @@ while True:
     elif args[0] in shell_commands.keys():
         response = shell_commands[args[0]](args)
     else:
-        os.system(inputText)
+        response = os_command(inputText)
 
     if response["code"] != 0:
         print(response["text"])
+
+#if at root, and no : then consider it to be a bucket name
+#if : then consider it to be a full path name
