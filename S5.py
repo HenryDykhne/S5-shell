@@ -66,8 +66,5 @@ while True:
     else:
         response = os_command(inputText)
 
-    if response["code"] != 0:
+    if response["text"] != "":
         print(response["text"])
-
-#if at root, and no : then consider it to be a bucket name
-#if : then consider it to be a full path name

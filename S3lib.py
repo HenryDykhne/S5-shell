@@ -3,7 +3,7 @@ import boto3
 from botocore.exceptions import ClientError
 import configparser
 import re
-import logging
+from tabulate import tabulate
 
 class S3:
     initial_response = {"code": 1, "text":"unspecified error"}
@@ -17,6 +17,13 @@ class S3:
         self.commands['create_bucket'] = self.create_bucket
         self.commands['create_folder'] = self.create_folder
         self.commands['ch_folder'] = self.ch_folder
+        self.commands['cwf'] = self.cwf
+        self.commands['list'] = self.list
+        self.commands['ccopy'] = self.ccopy
+        self.commands['delete_object'] = self.delete_object
+        self.commands['delete_bucket'] = self.delete_bucket
+        
+
         self.s3path = ""
 
     def config(self):
@@ -42,8 +49,7 @@ class S3:
 
         destinationSplit = args[2].split(':')
         if len(destinationSplit) != 2:
-            destinationSplit = (self.path + args[2]).split(':') 
-            #make sure to manually add : after buckets in path during ch_folder
+            destinationSplit = (self.path +("/" if re.search(":[\s\S]+", self.path) else "") + args[2]).split(':') 
         
         if len(destinationSplit) != 2:
             response["text"] = "invalid destination format"
@@ -74,8 +80,7 @@ class S3:
 
         sourceSplit = args[1].split(':')
         if len(sourceSplit) != 2:
-            sourceSplit = (self.path + args[1]).split(':') 
-            #make sure to manually add : after buckets in path during ch_folder
+            sourceSplit = (self.path +("/" if re.search(":[\s\S]+", self.path) else "") + args[1]).split(':') 
         
         if len(sourceSplit) != 2:
             response["text"] = "invalid source format"
@@ -132,6 +137,10 @@ class S3:
             response["text"] = "this shell does not support buckets named '.' or '..' or ''"
             return response
 
+        if ":" in args[1] or ".." in args[1]:
+            response["text"] = "this shell does not support bucket names containing the substrings ':' or '..'"
+            return response
+
         try:
             location = {'LocationConstraint': self.client.meta.region_name}
             self.client.create_bucket(Bucket=args[1], CreateBucketConfiguration=location)
@@ -150,12 +159,18 @@ class S3:
             return response
 
         destinationSplit = args[1].split(':')
-        if len(destinationSplit) != 2:
-            destinationSplit = (self.path + args[1]).split(':') 
-            #make sure to manually add : after buckets in path during ch_folder
+        if len(destinationSplit) != 2:  #if relative path
+            if '/' in args[1]:
+                response["text"] = "this shell does not support the creation of nested folders in a single create_folder command"
+                return response
+            destinationSplit = (self.path +("/" if re.search(":[\s\S]+", self.path) else "") + args[1]).split(':') 
         
         if len(destinationSplit) != 2:
-            response["text"] = "invalid destination format"
+            response["text"] = "invalid destination format. you may not be in a bucket " + str(destinationSplit)
+            return response
+
+        if ":" in destinationSplit[1] or ".." in destinationSplit[1]:
+            response["text"] = "this shell does not support folder names containing the substrings ':', or '..'"
             return response
 
         bucketName = destinationSplit[0]
@@ -179,7 +194,6 @@ class S3:
         folderPath = destinationSplit[1]
 
         splitPath = folderPath.split('/')
-
         i = 0
         while i < len(splitPath):
             if splitPath[i] == '..':
@@ -211,19 +225,17 @@ class S3:
                 self.client.head_bucket(Bucket = bucket)
                 response["code"] = 0
                 response["text"] = ""
-                return response
             except Exception as e:
                 response["text"] = "invalid bucket: " + str(e)
-                return response
         else:
             try:
                 self.client.head_object(Bucket = bucket, Key = objPath)
                 response["code"] = 0
                 response["text"] = ""
-                return response
             except Exception as e:
-                response["text"] = "object does not exist: " + str(e)
-                return response
+                response["text"] = "object/directory does not exist: " + str(e)
+            
+        return response
             
 
     def ch_folder(self, args):
@@ -246,9 +258,8 @@ class S3:
         else:
             destinationSplit = args[1].split(':')
             if len(destinationSplit) != 2:
-                destinationSplit = (self.path + args[1]).split(':') 
-                #make sure to manually add : after buckets in path during ch_folder
-            
+                destinationSplit = (self.path +("/" if re.search(":[\s\S]+", self.path) else "") + args[1]).split(':') 
+
             if len(destinationSplit) != 2:
                 response["text"] = "invalid destination format"
                 return response
@@ -260,14 +271,172 @@ class S3:
             response["code"] = 0
             response["text"] = ""
             return response
-
-        val = self.validate_path(tempBucket, tempFolderPath + ('/' if tempFolderPath != '' else ''))
+        
+        val = self.validate_path(tempBucket, tempFolderPath + ("/" if tempFolderPath != "" else ""))
         if val['code'] == 0:
-            self.path = tempBucket + (':' if tempBucket != '' else '') + tempFolderPath + ('/' if tempFolderPath != '' else '')
+            self.path = tempBucket + (':' if tempBucket != '' else '') + tempFolderPath
         return val
-        #if at root and no :. then consider to be bucket name
-        # if not at root and no : consider to be relative path
-        # if : then full path name
-        # need check for '/'
-        #check if real bucket + folder
+
+    def cwf(self, args):
+        response = copy.deepcopy(self.initial_response)
+        if self.path == "":
+            response["text"] = "/"
+        else:
+            response["text"] = self.path
+
+        response["code"] = 0
+        return response
+
+    def list(self, args):
+        response = copy.deepcopy(self.initial_response)
+        if len(args) >= 2 and args[1] == "-l":
+            lFlag = True
+        else:
+            lFlag = False
+
+        if self.path == "":
+            try:
+                bucketList = []
+                bucketListLite = []
+                result = self.client.list_buckets()["Buckets"]
+                if result == None:
+                    response["text"] = "no buckets"
+                else:
+                    for bucket in result:
+                        bucketListLite.append([bucket["Name"]])
+                        bucketList.append([bucket["Name"], bucket["CreationDate"]])
+                    if lFlag:
+                        response["text"] = tabulate(bucketList, headers = ["BucketName", "Creation Date"], tablefmt = "pretty", stralign = "left")
+
+                    else:
+                        response["text"] = tabulate(bucketListLite, headers = ["BucketName"], tablefmt = "pretty", stralign = "left")
+
+                response["code"] = 0
+            except Exception as e:
+                response["text"] = "could not retrive buckets: " + str(e)
+                response["code"] = 1
+            return response
+
+        splitPath = self.path.split(":")
+        try:
+            objectList = []
+            objectListLite = []
+            prefix = splitPath[1] + ("/" if splitPath[1] != "" else "")
+            result = self.client.list_objects(Bucket = splitPath[0], Prefix = prefix)
+            if result.get('Contents') == None:
+                response["text"] = "empty"
+                response["code"] = 0
+                return response
+
+            for object in result.get('Contents'):
+                prefixPurged = object['Key'][len(prefix):]
+                if ('/' not in prefixPurged or (prefixPurged.count('/') == 1 and prefixPurged[-1] == '/')) and prefixPurged != "":
+                    objectList.append([prefixPurged, str(object['Size'] / 1024) + " KB", object['LastModified']])
+                    objectListLite.append([prefixPurged])
+
+            if lFlag:
+                returnText = tabulate(objectList, headers = ["Name", "Size", "Last Modified"], tablefmt = "pretty", stralign = "left")
+            else:
+                returnText = tabulate(objectListLite, headers = ["Name"], tablefmt = "pretty", stralign = "left")
+            
+            response["text"] = returnText
+            response["code"] = 0
+        except Exception as e:
+            response["text"] = "could not retrive list of items: " + str(e)
+
+        return response
+
+    def ccopy(self, args):
+        response = copy.deepcopy(self.initial_response)
+        if len(args) != 3:
+            response["text"] = "invalid number of arguments"
+            return response
+
+        destinationSplit = args[2].split(':')
+        if len(destinationSplit) != 2:
+            destinationSplit = (self.path +("/" if re.search(":[\s\S]+", self.path) else "") + args[2]).split(':') 
+        
+        if len(destinationSplit) != 2:
+            response["text"] = "invalid destination format"
+            return response
+
+        destinationBucketName = destinationSplit[0]
+        destinationObjName = destinationSplit[1]
+
+        sourceSplit = args[1].split(':')
+        if len(sourceSplit) != 2:
+            sourceSplit = (self.path +("/" if re.search(":[\s\S]+", self.path) else "") + args[1]).split(':') 
+        
+        if len(sourceSplit) != 2:
+            response["text"] = "invalid source format"
+            return response
+
+        sourceBucketName = sourceSplit[0]
+        sourceObjName = sourceSplit[1]
+
+        if destinationObjName == "../" or destinationObjName == "./" or destinationObjName == "/" or sourceObjName == "../" or sourceObjName == "./" or sourceObjName == "/":
+            response["text"] = "this shell does not support files named '.' or '..' or ''"
+            return response
+
+        copy_source = {
+            'Bucket': sourceBucketName,
+            'Key': sourceObjName
+        }
+
+        try:
+            self.client.copy(copy_source, destinationBucketName, destinationObjName)
+            response["text"] = ""
+            response["clode"] = 0
+        except Exception as e:
+            response["text"] = "could not retrive buckets: " + str(e)
+        
+        return response
+
+    def delete_object(self, args):
+        response = copy.deepcopy(self.initial_response)
+        ###implement this
+        ##################33
+        ####################33
+        #########################
+        #########################
+        ######################
+        return None
+
+    def delete_bucket(self, args):
+        response = copy.deepcopy(self.initial_response)
+        if(len(args) != 2):
+            response["text"] = "invalid number of arguments"
+            return response
+
+        #if in bucket
+        if self.path != "" and self.path.split(":")[0] == args[1]:
+            response["text"] = "cannot delete bucket shell is occupying"
+            return response
+
+        #if bucket exists
+        try:
+            self.client.head_bucket(Bucket=args[1])
+        except Exception as e:
+            response["text"] = "bucket does not exist: " + str(e)
+            return response
+        
+        #if bucket is empty
+        try:
+            result = self.client.list_objects(Bucket = args[1])
+            if result.get('Contents') != None:
+                response["text"] = "deletion cannot be completed. bucket is not empty"
+                return response
+        except Exception as e:
+            response["text"] = "unable to check if bucket is empty before deletion. try again: " + str(e)
+            return response
+        
+        try:
+            response = self.client.delete_bucket(Bucket=args[1])
+        except Exception as e:
+            response["text"] = "failed to delete bucket: " + str(e)
+            return response
+
+        response["text"] = ""
+        response["code"] = 0
+        return response
 
