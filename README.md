@@ -11,6 +11,8 @@
 * exit using `exit` or `quit`
 * for long version of list command, use `-l` flag. ex: `list -l`
 * the `ch_folder` command supports and will try to interperet `..` within file paths. Other functions do not at the moment.
+* example of proper full path name. ex:`bucketName:path/to/your/object.txt` or ex: `bucketName:path/to/your/folder` or ex: `bucketName:` or ex: `/`
+* example of bucket name: ex `bucketName`
 
 # Avaliable S3 Functions
 ```
