@@ -10,7 +10,11 @@ class S3:
     path = ""
     def __init__(self):
         self.client = None
-        self.config()
+        result = self.config()
+        if result['code'] == 1:
+            self.connected = False
+        else:
+            self.connected = True
         self.commands = {}
         self.commands['lc_copy'] = self.lc_copy
         self.commands['cl_copy'] = self.cl_copy
@@ -20,25 +24,41 @@ class S3:
         self.commands['cwf'] = self.cwf
         self.commands['list'] = self.list
         self.commands['ccopy'] = self.ccopy
-        self.commands['delete_object'] = self.delete_object
+        self.commands['cdelete'] = self.cdelete
         self.commands['delete_bucket'] = self.delete_bucket
-        
-
         self.s3path = ""
 
     def config(self):
+        response = copy.deepcopy(self.initial_response)
         config = configparser.ConfigParser()
         config.read('S5-S3conf')
         ACCESS_KEY = config.get('edykhne', 'aws_access_key_id')
         SECRET_KEY = config.get('edykhne', 'aws_secret_access_key')
         REGION = config.get('edykhne', 'default_region_name')
-        client = boto3.client(
-            's3',
-            aws_access_key_id = ACCESS_KEY,
-            aws_secret_access_key = SECRET_KEY,
-            region_name = REGION
-        )
-        self.client = client
+        try:
+            self.client = boto3.client(
+                's3',
+                aws_access_key_id = ACCESS_KEY,
+                aws_secret_access_key = SECRET_KEY,
+                region_name = REGION
+            )
+            self.client.list_buckets()
+            response["code"] = 0
+            response["text"] = ""
+        except Exception as e:
+            response["text"] = "connection unsuccessfull: " + str(e)
+
+        return response
+
+    def does_folder_exist(self, bucket, folderPath) -> bool:
+        #if folder/object exists
+        if folderPath == "" and bucket != "":
+            return True
+        try:
+            self.client.head_object(Bucket=bucket, Key=folderPath + "/")
+            return True
+        except Exception:
+            return False
 
     def lc_copy(self, args):
         response = copy.deepcopy(self.initial_response)
@@ -55,6 +75,10 @@ class S3:
             response["text"] = "invalid destination format"
             return response
 
+        if not self.does_folder_exist(destinationSplit[0], '/'.join(destinationSplit[1].split('/')[:-1])):
+            response["text"] = "the folderpath leading to this new object does not exist"
+            return response
+
         bucketName = destinationSplit[0]
         objName = destinationSplit[1]
 
@@ -67,7 +91,7 @@ class S3:
             response["code"] = 0
             response["text"] = ""
         except (ClientError, FileNotFoundError) as e:
-            response["text"] = str(e)
+            response["text"] = "copy failed" + str(e)
 
         return response
 
@@ -88,6 +112,10 @@ class S3:
 
         bucketName = sourceSplit[0]
         objName = sourceSplit[1]
+
+        if len(objName) > 1 and objName[-1] == "/":
+            response["text"] = "you may not copy a folder object (why would you want to knucklehead? you wont get the stuff inside it because its s3)"
+            return response
 
         if objName == "../" or objName == "./" or objName == "/":
             response["text"] = "this shell does not support files named '.' or '..' or ''"
@@ -171,6 +199,10 @@ class S3:
 
         if ":" in destinationSplit[1] or ".." in destinationSplit[1]:
             response["text"] = "this shell does not support folder names containing the substrings ':', or '..'"
+            return response
+
+        if self.does_folder_exist(destinationSplit[0], destinationSplit[1]):
+            response["text"] = "this folder already exists"
             return response
 
         bucketName = destinationSplit[0]
@@ -323,7 +355,7 @@ class S3:
             objectListLite = []
             prefix = splitPath[1] + ("/" if splitPath[1] != "" else "")
             result = self.client.list_objects(Bucket = splitPath[0], Prefix = prefix)
-            if result.get('Contents') == None:
+            if len(result.get('Contents')) == 1:
                 response["text"] = "empty"
                 response["code"] = 0
                 return response
@@ -363,6 +395,10 @@ class S3:
         destinationBucketName = destinationSplit[0]
         destinationObjName = destinationSplit[1]
 
+        if not self.does_folder_exist(destinationSplit[0], '/'.join(destinationSplit[1].split('/')[:-1])):
+            response["text"] = "the folderpath leading to this new object does not exist"
+            return response
+
         sourceSplit = args[1].split(':')
         if len(sourceSplit) != 2:
             sourceSplit = (self.path +("/" if re.search(":[\s\S]+", self.path) else "") + args[1]).split(':') 
@@ -373,6 +409,10 @@ class S3:
 
         sourceBucketName = sourceSplit[0]
         sourceObjName = sourceSplit[1]
+
+        if len(sourceObjName) > 1 and sourceObjName[-1] == "/":
+            response["text"] = "you may not copy a folder object (why would you want to knucklehead? you wont get the stuff inside it because its s3)"
+            return response
 
         if destinationObjName == "../" or destinationObjName == "./" or destinationObjName == "/" or sourceObjName == "../" or sourceObjName == "./" or sourceObjName == "/":
             response["text"] = "this shell does not support files named '.' or '..' or ''"
@@ -392,15 +432,54 @@ class S3:
         
         return response
 
-    def delete_object(self, args):
+    def cdelete(self, args):
         response = copy.deepcopy(self.initial_response)
-        ###implement this
-        ##################33
-        ####################33
-        #########################
-        #########################
-        ######################
-        return None
+        if len(args) < 2:
+            response["text"] = "invalid number of arguments"
+            return response
+        if len(args) == 3 and args[2] == "-d":
+            folderFlag = True
+        else:
+            folderFlag = False
+
+        #if in folder
+        deletionSplit = args[1].split(':')
+        if len(deletionSplit) != 2:
+            deletionSplit = (self.path + ("/" if re.search(":[\s\S]+", self.path) else "") + args[1]).split(':')
+        if len(deletionSplit) != 2:
+            response["text"] = "invalid folder/object format"
+            return response
+        if folderFlag and self.path == deletionSplit[0] + ":" + deletionSplit[1]:
+            response["text"] = "cannot delete folder shell is occupying"
+            return response
+
+        #if folder/object exists
+        try:
+            self.client.head_object(Bucket=deletionSplit[0], Key=deletionSplit[1] + ("/" if folderFlag else ""))
+        except Exception as e:
+            response["text"] = "folder/object does not exist. make sure to use -d flag for folders: " + str(e)
+            return response
+        
+        #if folder, check if is empty
+        if folderFlag:
+            try:
+                result = self.client.list_objects(Bucket = deletionSplit[0], Prefix = deletionSplit[1] + "/")
+                if len(result.get('Contents')) > 1:
+                    response["text"] = "deletion cannot be completed. folder is not empty"
+                    return response
+            except Exception as e:
+                response["text"] = "unable to check if folder is empty before deletion. try again: " + str(e)
+                return response
+        
+        try:
+            response = self.client.delete_object(Bucket=deletionSplit[0], Key=deletionSplit[1] + ("/" if folderFlag else ""))
+        except Exception as e:
+            response["text"] = "failed to delete folder: " + str(e)
+            return response
+
+        response["text"] = ""
+        response["code"] = 0
+        return response
 
     def delete_bucket(self, args):
         response = copy.deepcopy(self.initial_response)

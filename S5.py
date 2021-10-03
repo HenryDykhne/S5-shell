@@ -4,6 +4,7 @@ import readline
 from S3lib import S3
 import copy
 
+global path 
 path = os.getcwd()
 initial_response = {"code": 1, "text":"unspecified error"}
 
@@ -18,6 +19,7 @@ def os_command(inputText):
     return response
 
 def cd(args):
+    global path
     response = copy.deepcopy(initial_response)
     if len(args) == 1 or args[1] == "" or args[1] == " ":
         args[1] = ""
@@ -35,21 +37,17 @@ def cd(args):
 #commands
 shell_commands = {}
 shell_commands['cd'] = cd
+
+
+print("Welcome to the AWS S3 Storage Shell (S5)")
+print("Now connecting to S3")
 s3 = S3()
-
-
-
-if s3.client is not None: #FIXME: this does not work. fix it
-    #DONT FORGET!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    print("Welcome to the AWS S3 Storage Shell (S5)")
+if s3.connected is not False:
     print("You are now connected to your S3 storage")
 else:
-    print("Welcome to the AWS S3 Storage Shell (S5)")
     print("You could not be connected to your S3 storage")
-    print("Please review procedures for authenticating your account on AWS S3")
+    print("Please review procedures for authenticating your account on AWS S3 or check your internet connection")
+    exit()
 
 while True:
     inputText = input(path + ":S5> ")
